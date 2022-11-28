@@ -1,0 +1,192 @@
+#!/usr/bin/env ruby
+
+require "fileutils"
+require "yaml"
+require "open-uri"
+require "net/http"
+require "rmagick"
+include Magick
+
+TEMP_DIR = "./.ms.tmp"
+
+# False if URL returns a 200
+#
+# @param url [String] the url to be checked
+# @return [Boolean] whether or not the URL is invalid
+def invalid?(url)
+  uri = URI(url)
+  !Net::HTTP.start(uri.host, 443, use_ssl: true){ |http| break http.head uri.path }.instance_of? Net::HTTPOK
+end
+
+# Parses ARGV input into usable URL with given X and Y values
+#
+# @param x [Integer] x-coordinate
+# @param y [Integer] y-coordinate
+# @return usable URL for map tile
+def build_url(url, x, y)
+  url.gsub(/xxx/i, x.to_s).gsub(/yyy/i, y.to_s)
+end
+
+if ARGV.empty? or %w[-h --help].include? ARGV.first
+  puts 'Usage: mapsnatcher "http://mapwebsite.com/0/XXX/YYY.png"'
+  puts
+  puts "       Place XXX and YYY in place of where the respective coordinate numbers would be"
+  puts "       in the URL. The first number is typically the zoom level, which is constant."
+  puts
+  puts "  [-b] find outer bounds of map automatically"
+  exit 0
+end
+
+if %w[-v --version].include? ARGV.first
+  puts "mapsnatcher #{File.read(File.expand_path("../../VERSION", __FILE__)).strip}"
+  exit 0
+end
+
+# Load/create temp directory
+if !File.exists? TEMP_DIR
+  Dir.mkdir TEMP_DIR
+elsif !Dir.empty? TEMP_DIR
+  print "It looks like mapsnatcher didn't close properly. Use backed up files? [Y/n] "
+  FileUtils.rm_f(Dir.glob("#{TEMP_DIR}/*")) if STDIN.gets.chomp =~ /n.*/i
+  puts
+end
+
+if ARGV.include? "-b"
+  # Automatic boundary mode
+
+  url = (ARGV - ["-b"]).first
+
+  # CLI input function
+  #
+  # @return [Array] user input coordinates
+  def get_coords
+    print "Enter valid X coordinate [0]: "
+    x_in = STDIN.gets.chomp.to_i
+    print "Enter valid Y coordinate [0]: "
+    y_in = STDIN.gets.chomp.to_i
+
+    print "\nLoading...\r"
+
+    [x_in, y_in]
+  end
+
+  valid_x, valid_y = get_coords
+
+  while invalid? build_url(url, valid_x, valid_y)
+    puts "Invalid coordinate! Try again."
+    puts
+    valid_x, valid_y = get_coords
+  end
+
+  x_low = x_high = valid_x
+  until invalid? build_url(url, x_low - 1, valid_y)
+    print "Checking X value: #{x_low}     \r"
+    x_low -= 1
+  end
+  until invalid? build_url(url, x_high + 1, valid_y)
+    print "Checking X value: #{x_high}     \r"
+    x_high += 1
+  end
+
+  y_low = y_high = valid_y
+  until invalid? build_url(url, valid_x, y_low - 1)
+    print "Checking Y value: #{y_low}     \r"
+    y_low -= 1
+  end
+  until invalid? build_url(url, valid_x, y_high + 1)
+    print "Checking Y value: #{y_high}     \r"
+    y_high += 1
+  end
+
+  puts "Found Coordinate Range: [#{x_low}-#{x_high}], [#{y_low}-#{y_high}]"
+
+  x_range, y_range = (x_low..x_high), (y_low..y_high)
+else
+  # User input coordinate mode
+
+  url = ARGV.first
+
+  # CLI input function
+  #
+  # @return [Array] user input coordinate ranges
+  def get_coords
+    print "Start of X range [0]: "
+    x_start = STDIN.gets.chomp.to_i
+    print "End of X range: "
+    x_range_in = (x_start..STDIN.gets.chomp.to_i)
+
+    print "Start of Y range [0]: "
+    y_start = STDIN.gets.chomp.to_i
+    print "End of Y range: "
+    y_range_in = (y_start..STDIN.gets.chomp.to_i)
+
+    print "\nLoading...\r"
+
+    [x_range_in, y_range_in]
+  end
+
+  x_range, y_range = get_coords
+
+  while invalid?(build_url url, x_range.first, y_range.first) or
+        invalid?(build_url url, x_range.first, y_range.last)  or
+        invalid?(build_url url, x_range.last, y_range.first)  or
+        invalid?(build_url url, x_range.last, y_range.last)
+    puts "\nError: Boundaries incorrect."
+    puts "Use `mapsnatcher -b` for help finding the boundaries of the image."
+    puts
+    x_range, y_range = get_coords
+  end
+end
+
+# Use the tile at 0, 0 to calculate final image size
+sample = Image.from_blob(URI.open(build_url url, x_range.first, y_range.first).read).first
+final_size = {x: sample.columns * x_range.size, y: sample.rows * y_range.size}
+puts "Image found, #{sample.format} size #{final_size[:x]}x#{final_size[:y]}"
+puts
+
+dl_counter = 0
+dl_total = x_range.size * y_range.size
+
+stitch = ImageList.new
+y_range.each do |y|
+  row = ImageList.new
+  x_range.each do |x|
+    print "Downloading... [#{dl_counter += 1}/#{dl_total}]\r"
+
+    temp = "#{TEMP_DIR}/#{x}_#{y}.tmp"
+    if File.exists? temp
+      # Load the backup file
+      blob = YAML.load(File.read temp)
+    else
+      blob = URI.open(build_url url, x, y).read
+      File.open(temp, "w") { |f| f.write(YAML.dump blob) }
+    end
+
+    row.push Image.from_blob(blob).first
+  end
+
+  stitch.push row.append(false)
+end
+
+puts "\nDone!"
+
+# Warnings for incompatible formats for large image sizes
+JPEG_MAX = 65535
+WEBP_MAX = 16383
+
+if final_size.values.max > JPEG_MAX
+  puts "\nWarning! Image dimensions greater than #{JPEG_MAX}px, JPG and WEBP"
+  puts "formats are unavailable."
+  puts
+elsif final_size.values.max > WEBP_MAX
+  puts "\nWarning! Image dimensions greater than #{WEBP_MAX}px, WEBP"
+  puts "format is unavailable."
+  puts
+end
+
+print "Enter file name for map: "
+filename = STDIN.gets.chomp
+print "Saving, this may take a minute..."
+stitch.append(true).write filename
+FileUtils.rm_rf TEMP_DIR
+puts "\nImage written to: #{filename}"

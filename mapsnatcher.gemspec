@@ -1,0 +1,25 @@
+Gem::Specification.new do |gem|
+  gem.name = "mapsnatcher"
+  gem.version = File.read(File.expand_path("../VERSION", __FILE__)).strip
+
+  gem.author = "Vinny Diehl"
+  gem.email = "vinny.diehl@gmail.com"
+  gem.homepage = "https://github.com/vinnydiehl/mapsnatcher"
+
+  gem.license = "MIT"
+
+  gem.summary = "Downloads and combines tiles from QGIS maps into an image."
+  gem.description = "Downloads and combines tiles from QGIS maps into an image."
+
+  gem.bindir = "bin"
+  gem.executables = %w[mapsnatcher]
+
+  gem.test_files = Dir["spec/**/*"]
+  gem.files = Dir["bin/**/*"] + gem.test_files + %w[
+    LICENSE README.md VERSION mapsnatcher.gemspec
+  ]
+
+  gem.required_ruby_version = "~> 3.0"
+
+  gem.add_dependency "rmagick", "~> 5.1"
+end

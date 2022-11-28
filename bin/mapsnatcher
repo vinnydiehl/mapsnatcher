@@ -167,7 +167,7 @@ y_range.each do |y|
       img = Image.read(temp).first
     else
       blob = URI.open(build_url url, x, y).read
-      File.open(temp, "w") { |f| f.write blob }
+      File.open(temp, "wb") { |f| f.write blob }
       img = Image.from_blob(blob).first
     end
 

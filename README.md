@@ -24,3 +24,5 @@ boundaries that you would like to capture.
 If you are unsure of the boundaries and would like to capture the entire map,
 add the `-b` argument and you will only need to enter one valid coordinate;
 `mapsnatcher` will do the rest.
+
+If you would like to save the tiles, add the `-s` argument.

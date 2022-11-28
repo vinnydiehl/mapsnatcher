@@ -1,13 +1,13 @@
 #!/usr/bin/env ruby
 
 require "fileutils"
-require "yaml"
 require "open-uri"
 require "net/http"
 require "rmagick"
 include Magick
 
 TEMP_DIR = "./.ms.tmp"
+TILES_DIR = "./tiles"
 
 # False if URL returns a 200
 #
@@ -34,6 +34,7 @@ if ARGV.empty? or %w[-h --help].include? ARGV.first
   puts "       in the URL. The first number is typically the zoom level, which is constant."
   puts
   puts "  [-b] find outer bounds of map automatically"
+  puts "  [-s] save tiles to a directory ./tiles/"
   exit 0
 end
 
@@ -51,10 +52,16 @@ elsif !Dir.empty? TEMP_DIR
   puts
 end
 
-if ARGV.include? "-b"
+save_tiles = false
+if (args = ARGV).include? "-s"
+  args -= ["-s"]
+  save_tiles = true
+end
+
+if args.include? "-b"
   # Automatic boundary mode
 
-  url = (ARGV - ["-b"]).first
+  url = (args - ["-b"]).first
 
   # CLI input function
   #
@@ -104,7 +111,7 @@ if ARGV.include? "-b"
 else
   # User input coordinate mode
 
-  url = ARGV.first
+  url = args.first
 
   # CLI input function
   #
@@ -141,7 +148,8 @@ end
 # Use the tile at 0, 0 to calculate final image size
 sample = Image.from_blob(URI.open(build_url url, x_range.first, y_range.first).read).first
 final_size = {x: sample.columns * x_range.size, y: sample.rows * y_range.size}
-puts "Image found, #{sample.format} size #{final_size[:x]}x#{final_size[:y]}"
+format = sample.format
+puts "Image found, #{format} size #{final_size[:x]}x#{final_size[:y]}"
 puts
 
 dl_counter = 0
@@ -153,16 +161,17 @@ y_range.each do |y|
   x_range.each do |x|
     print "Downloading... [#{dl_counter += 1}/#{dl_total}]\r"
 
-    temp = "#{TEMP_DIR}/#{x}_#{y}.tmp"
+    temp = "#{TEMP_DIR}/#{x}_#{y}.#{format.downcase}"
     if File.exists? temp
       # Load the backup file
-      blob = YAML.load(File.read temp)
+      img = Image.read(temp).first
     else
       blob = URI.open(build_url url, x, y).read
-      File.open(temp, "w") { |f| f.write(YAML.dump blob) }
+      File.open(temp, "w") { |f| f.write blob }
+      img = Image.from_blob(blob).first
     end
 
-    row.push Image.from_blob(blob).first
+    row.push img
   end
 
   stitch.push row.append(false)
@@ -188,5 +197,11 @@ print "Enter file name for map: "
 filename = STDIN.gets.chomp
 print "Saving, this may take a minute..."
 stitch.append(true).write filename
-FileUtils.rm_rf TEMP_DIR
 puts "\nImage written to: #{filename}"
+
+if save_tiles
+  File.rename TEMP_DIR, TILES_DIR
+  puts "Tiles saved to: #{TILES_DIR.match /\w+/}/"
+else
+  FileUtils.rm_rf TEMP_DIR
+end

@@ -1,7 +1,6 @@
 #!/usr/bin/env ruby
 
 require "fileutils"
-require "yaml"
 require "open-uri"
 require "net/http"
 require "rmagick"
@@ -141,7 +140,8 @@ end
 # Use the tile at 0, 0 to calculate final image size
 sample = Image.from_blob(URI.open(build_url url, x_range.first, y_range.first).read).first
 final_size = {x: sample.columns * x_range.size, y: sample.rows * y_range.size}
-puts "Image found, #{sample.format} size #{final_size[:x]}x#{final_size[:y]}"
+format = sample.format
+puts "Image found, #{format} size #{final_size[:x]}x#{final_size[:y]}"
 puts
 
 dl_counter = 0
@@ -153,16 +153,17 @@ y_range.each do |y|
   x_range.each do |x|
     print "Downloading... [#{dl_counter += 1}/#{dl_total}]\r"
 
-    temp = "#{TEMP_DIR}/#{x}_#{y}.tmp"
+    temp = "#{TEMP_DIR}/#{x}_#{y}.#{format.downcase}"
     if File.exists? temp
       # Load the backup file
-      blob = YAML.load(File.read temp)
+      img = Image.read(temp).first
     else
       blob = URI.open(build_url url, x, y).read
-      File.open(temp, "w") { |f| f.write(YAML.dump blob) }
+      File.open(temp, "w") { |f| f.write blob }
+      img = Image.from_blob(blob).first
     end
 
-    row.push Image.from_blob(blob).first
+    row.push img
   end
 
   stitch.push row.append(false)

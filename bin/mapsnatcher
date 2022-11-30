@@ -87,21 +87,21 @@ if args.include? "-b"
 
   x_low = x_high = valid_x
   until invalid? build_url(url, x_low - 1, valid_y)
-    print "Checking X value: #{x_low}     \r"
+    print "\e[KChecking X value: #{x_low}\r"
     x_low -= 1
   end
   until invalid? build_url(url, x_high + 1, valid_y)
-    print "Checking X value: #{x_high}     \r"
+    print "\e[KCChecking X value: #{x_high}\r"
     x_high += 1
   end
 
   y_low = y_high = valid_y
   until invalid? build_url(url, valid_x, y_low - 1)
-    print "Checking Y value: #{y_low}     \r"
+    print "\e[KCChecking Y value: #{y_low}\r"
     y_low -= 1
   end
   until invalid? build_url(url, valid_x, y_high + 1)
-    print "Checking Y value: #{y_high}     \r"
+    print "\e[KCChecking Y value: #{y_high}\r"
     y_high += 1
   end
 

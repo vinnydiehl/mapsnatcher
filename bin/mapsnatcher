@@ -173,9 +173,9 @@ y_range.each do |y|
 
     row.push img
   end
-
-  stitch.push row.append(false)
 end
+
+thread = Thread.new { stitch = stitch.append(true) }
 
 puts "\nDone!"
 
@@ -196,9 +196,10 @@ end
 print "Enter file name for map: "
 filename = STDIN.gets.chomp
 print "Saving, this may take a minute..."
-stitch.append(true).write filename
-puts "\nImage written to: #{filename}"
 
+thread.join
+stitch.write filename
+puts "\nImage written to: #{filename}"
 if save_tiles
   File.rename TEMP_DIR, TILES_DIR
   puts "Tiles saved to: #{TILES_DIR.match /\w+/}/"

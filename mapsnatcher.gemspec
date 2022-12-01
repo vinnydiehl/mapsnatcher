@@ -8,7 +8,7 @@ Gem::Specification.new do |gem|
 
   gem.license = "MIT"
 
-  gem.summary = "Downloads and combines tiles from QGIS maps into an image."
+  gem.summary = "QGIS map downloading and tiling."
   gem.description = "Downloads and combines tiles from QGIS maps into an image."
 
   gem.bindir = "bin"
@@ -22,4 +22,5 @@ Gem::Specification.new do |gem|
   gem.required_ruby_version = "~> 3.0"
 
   gem.add_dependency "rmagick", "~> 5.1"
+  gem.add_dependency "optimist", "~> 3.0"
 end

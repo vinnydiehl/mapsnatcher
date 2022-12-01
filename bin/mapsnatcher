@@ -1,13 +1,65 @@
 #!/usr/bin/env ruby
 
+require "optimist"
 require "fileutils"
 require "open-uri"
 require "net/http"
+require "yaml"
 require "rmagick"
 include Magick
 
 TEMP_DIR = "./.ms.tmp"
+COORDS_FILE = "#{TEMP_DIR}/coords"
 TILES_DIR = "./tiles"
+
+opts = Optimist::options do
+  version "mapsnatcher #{File.read(File.expand_path("../../VERSION", __FILE__)).strip}"
+  banner self.version
+  banner "Usage:"
+  banner "  mapsnatcher [options] http://mapwebsite.com/0/xxx/yyy.png"
+  banner "  Place XXX and YYY in place of where the respective coordinate numbers would be"
+  banner "  in the URL. The first number is typically the zoom level, which is constant."
+  banner "\n  Inputs may be given through the CLI, or with flags:"
+  banner "  mapsnatcher <url> -x 0-500 -y 0-300"
+  banner "  mapsnatcher -b <url> -x 200 -y 200"
+  banner "\nOptions:"
+  opt :bounds, "find outer boundaries of the map automatically"
+  opt :save, "save tiles to a directory ./tiles/"
+  opt :version, "display version number"
+  opt :help, "display this message"
+  banner "I/O:"
+  opt :x, "x-coordinate range, (or x-coordinate if using -b)", type: :string
+  opt :y, "y-coordinate range, (or y-coordinate if using -b)", type: :string
+  opt :output, "output file name & location", type: :string
+  educate_on_error
+end
+
+x_range = y_range = nil
+xy_in = opts.values_at(:x, :y)
+using_xy_in = opts[:x] or opts[:y] # or, if missing one it'll throw this:
+if using_xy_in
+  if xy_in.map { |o| o =~ /\A\d+#{/-\d+/ unless opts[:bounds]}\z/ }.include? nil
+    puts "Error: Invalid coordinate input."
+    puts
+    Optimist::educate
+  end
+
+  # Parse X/Y input into something we can use later
+  if opts[:bounds]
+    xy_in.map! &:to_i
+  else
+    x_range, y_range = xy_in.map { |r| Range.new *r.split("-").map(&:to_i) }
+  end
+end
+
+Optimist::educate if ARGV.empty?
+if ARGV.first !~ /\A#{URI::regexp(["http", "https"])}\z/
+  puts "Error: Invalid URL."
+  puts
+  Optimist::educate
+end
+
+url = ARGV.first
 
 # False if URL returns a 200
 #
@@ -27,41 +79,26 @@ def build_url(url, x, y)
   url.gsub(/xxx/i, x.to_s).gsub(/yyy/i, y.to_s)
 end
 
-if ARGV.empty? or %w[-h --help].include? ARGV.first
-  puts 'Usage: mapsnatcher "http://mapwebsite.com/0/XXX/YYY.png"'
-  puts
-  puts "       Place XXX and YYY in place of where the respective coordinate numbers would be"
-  puts "       in the URL. The first number is typically the zoom level, which is constant."
-  puts
-  puts "  [-b] find outer bounds of map automatically"
-  puts "  [-s] save tiles to a directory ./tiles/"
-  exit 0
-end
-
-if %w[-v --version].include? ARGV.first
-  puts "mapsnatcher #{File.read(File.expand_path("../../VERSION", __FILE__)).strip}"
-  exit 0
-end
-
 # Load/create temp directory
-if !File.exists? TEMP_DIR
+using_saved_xy = false
+if !File.exist? TEMP_DIR
   Dir.mkdir TEMP_DIR
 elsif !Dir.empty? TEMP_DIR
   print "It looks like mapsnatcher didn't close properly. Use backed up files? [Y/n] "
-  FileUtils.rm_f(Dir.glob("#{TEMP_DIR}/*")) if STDIN.gets.chomp =~ /n.*/i
+  if STDIN.gets.chomp =~ /n.*/i
+    FileUtils.rm_f(Dir.glob("#{TEMP_DIR}/*"))
+  elsif [x_range, y_range].include?(nil) and File.exist? COORDS_FILE
+    print "Use coordinate range from last time? [Y/n] "
+    if STDIN.gets.chomp !~ /n.*/i
+      x_range, y_range = YAML.load_file(COORDS_FILE, permitted_classes: [Range])
+      using_saved_xy = true
+    end
+  end
   puts
 end
 
-save_tiles = false
-if (args = ARGV).include? "-s"
-  args -= ["-s"]
-  save_tiles = true
-end
-
-if args.include? "-b"
+if opts[:bounds]
   # Automatic boundary mode
-
-  url = (args - ["-b"]).first
 
   # CLI input function
   #
@@ -72,46 +109,43 @@ if args.include? "-b"
     print "Enter valid Y coordinate [0]: "
     y_in = STDIN.gets.chomp.to_i
 
-    print "\nLoading...\r"
+    print "\nLoading..."
 
     [x_in, y_in]
   end
 
-  valid_x, valid_y = get_coords
+  valid_x, valid_y = using_xy_in ? xy_in : get_coords
 
+  print "\rLoading..."
   while invalid? build_url(url, valid_x, valid_y)
-    puts "Invalid coordinate! Try again."
+    puts "\rInvalid coordinate! Try again."
     puts
     valid_x, valid_y = get_coords
   end
 
   x_low = x_high = valid_x
   until invalid? build_url(url, x_low - 1, valid_y)
-    print "Checking X value: #{x_low}     \r"
+    print "\r\e[KChecking X value: #{x_low}\r"
     x_low -= 1
   end
   until invalid? build_url(url, x_high + 1, valid_y)
-    print "Checking X value: #{x_high}     \r"
+    print "\r\e[KChecking X value: #{x_high}\r"
     x_high += 1
   end
 
   y_low = y_high = valid_y
   until invalid? build_url(url, valid_x, y_low - 1)
-    print "Checking Y value: #{y_low}     \r"
+    print "\r\e[KChecking Y value: #{y_low}\r"
     y_low -= 1
   end
   until invalid? build_url(url, valid_x, y_high + 1)
-    print "Checking Y value: #{y_high}     \r"
+    print "\r\e[KChecking Y value: #{y_high}\r"
     y_high += 1
   end
-
-  puts "Found Coordinate Range: [#{x_low}-#{x_high}], [#{y_low}-#{y_high}]"
 
   x_range, y_range = (x_low..x_high), (y_low..y_high)
 else
   # User input coordinate mode
-
-  url = args.first
 
   # CLI input function
   #
@@ -127,29 +161,35 @@ else
     print "End of Y range: "
     y_range_in = (y_start..STDIN.gets.chomp.to_i)
 
-    print "\nLoading...\r"
+    print "\nLoading..."
 
     [x_range_in, y_range_in]
   end
 
-  x_range, y_range = get_coords
+  x_range, y_range = get_coords unless using_xy_in
 
+  print "\rLoading..."
   while invalid?(build_url url, x_range.first, y_range.first) or
         invalid?(build_url url, x_range.first, y_range.last)  or
         invalid?(build_url url, x_range.last, y_range.first)  or
         invalid?(build_url url, x_range.last, y_range.last)
-    puts "\nError: Boundaries incorrect."
+    puts "\rError: Boundaries incorrect."
     puts "Use `mapsnatcher -b` for help finding the boundaries of the image."
     puts
     x_range, y_range = get_coords
   end
 end
 
+puts "\rUsing #{'Saved ' if using_saved_xy}Coordinate Range: [#{x_range.first}-#{x_range.last}], [#{y_range.first}-#{y_range.last}]"
+
+File.open(COORDS_FILE, "w") { |f| f.write [x_range, y_range].to_yaml }
+
 # Use the tile at 0, 0 to calculate final image size
+print "\rChecking dimensions..."
 sample = Image.from_blob(URI.open(build_url url, x_range.first, y_range.first).read).first
 final_size = {x: sample.columns * x_range.size, y: sample.rows * y_range.size}
 format = sample.format
-puts "Image found, #{format} size #{final_size[:x]}x#{final_size[:y]}"
+puts "\rImage found, #{format} size #{final_size[:x]}x#{final_size[:y]}"
 puts
 
 dl_counter = 0
@@ -158,11 +198,12 @@ dl_total = x_range.size * y_range.size
 stitch = ImageList.new
 y_range.each do |y|
   row = ImageList.new
+
   x_range.each do |x|
     print "Downloading... [#{dl_counter += 1}/#{dl_total}]\r"
 
-    temp = "#{TEMP_DIR}/#{x}_#{y}.#{format.downcase}"
-    if File.exists? temp
+    temp = "#{TEMP_DIR}/#{x}_#{y}.#{format == "JPEG" ? "jpg" : format.downcase}"
+    if File.exist? temp
       # Load the backup file
       img = Image.read(temp).first
     else
@@ -176,6 +217,8 @@ y_range.each do |y|
 
   stitch.push row.append(false)
 end
+
+thread = Thread.new { stitch = stitch.append(true) }
 
 puts "\nDone!"
 
@@ -193,15 +236,20 @@ elsif final_size.values.max > WEBP_MAX
   puts
 end
 
-print "Enter file name for map: "
-filename = STDIN.gets.chomp
-print "Saving, this may take a minute..."
-stitch.append(true).write filename
-puts "\nImage written to: #{filename}"
+unless filename = opts[:output]
+  print "Enter file name for map: "
+  filename = STDIN.gets.chomp
+end
 
-if save_tiles
-  File.rename TEMP_DIR, TILES_DIR
-  puts "Tiles saved to: #{TILES_DIR.match /\w+/}/"
+print "Saving, this may take a minute..."
+thread.join # Wait for ImageMagick thread to finish joining rows
+stitch.write filename
+puts "\n\nImage written to: #{filename}"
+
+if opts[:save]
+  FileUtils.rm COORDS_FILE
+  FileUtils.mv TEMP_DIR, TILES_DIR
+  puts "Tiles saved to: #{TILES_DIR.match(/\w+/)}/"
 else
   FileUtils.rm_rf TEMP_DIR
 end

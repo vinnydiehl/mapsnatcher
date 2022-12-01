@@ -27,9 +27,10 @@ opts = Optimist::options do
   opt :save, "save tiles to a directory ./tiles/"
   opt :version, "display version number"
   opt :help, "display this message"
-  banner "Inputs:"
+  banner "I/O:"
   opt :x, "x-coordinate range, (or x-coordinate if using -b)", type: :string
   opt :y, "y-coordinate range, (or y-coordinate if using -b)", type: :string
+  opt :output, "output file name & location", type: :string
   educate_on_error
 end
 
@@ -235,8 +236,10 @@ elsif final_size.values.max > WEBP_MAX
   puts
 end
 
-print "Enter file name for map: "
-filename = STDIN.gets.chomp
+unless filename = opts[:output]
+  print "Enter file name for map: "
+  filename = STDIN.gets.chomp
+end
 
 print "Saving, this may take a minute..."
 thread.join # Wait for ImageMagick thread to finish joining rows

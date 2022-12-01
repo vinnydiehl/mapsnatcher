@@ -3,10 +3,12 @@
 require "fileutils"
 require "open-uri"
 require "net/http"
+require "yaml"
 require "rmagick"
 include Magick
 
 TEMP_DIR = "./.ms.tmp"
+COORDS_FILE = "#{TEMP_DIR}/coords"
 TILES_DIR = "./tiles"
 
 # False if URL returns a 200
@@ -43,12 +45,23 @@ if %w[-v --version].include? ARGV.first
   exit 0
 end
 
+x_range = y_range = nil
+
 # Load/create temp directory
+using_saved_coords = false
 if !File.exists? TEMP_DIR
   Dir.mkdir TEMP_DIR
 elsif !Dir.empty? TEMP_DIR
   print "It looks like mapsnatcher didn't close properly. Use backed up files? [Y/n] "
-  FileUtils.rm_f(Dir.glob("#{TEMP_DIR}/*")) if STDIN.gets.chomp =~ /n.*/i
+  if STDIN.gets.chomp =~ /n.*/i
+    FileUtils.rm_f(Dir.glob("#{TEMP_DIR}/*"))
+  elsif File.exists? COORDS_FILE
+    print "Use coordinate range from last time? [Y/n] "
+    if STDIN.gets.chomp !~ /n.*/i
+      x_range, y_range = YAML.load_file(COORDS_FILE, permitted_classes: [Range])
+      using_saved_coords = true
+    end
+  end
   puts
 end
 
@@ -58,7 +71,11 @@ if (args = ARGV).include? "-s"
   save_tiles = true
 end
 
-if args.include? "-b"
+url = args.first
+
+if ![x_range, y_range].include? nil
+  puts "Found #{'Saved ' if using_saved_coords}Coordinate Range: [#{x_range.first}-#{x_range.last}], [#{y_range.first}-#{y_range.last}]"
+elsif args.include? "-b"
   # Automatic boundary mode
 
   url = (args - ["-b"]).first
@@ -72,7 +89,7 @@ if args.include? "-b"
     print "Enter valid Y coordinate [0]: "
     y_in = STDIN.gets.chomp.to_i
 
-    print "\nLoading...\r"
+    print "\nLoading..."
 
     [x_in, y_in]
   end
@@ -80,28 +97,28 @@ if args.include? "-b"
   valid_x, valid_y = get_coords
 
   while invalid? build_url(url, valid_x, valid_y)
-    puts "Invalid coordinate! Try again."
+    puts "\rInvalid coordinate! Try again."
     puts
     valid_x, valid_y = get_coords
   end
 
   x_low = x_high = valid_x
   until invalid? build_url(url, x_low - 1, valid_y)
-    print "\e[KChecking X value: #{x_low}\r"
+    print "\r\e[KChecking X value: #{x_low}\r"
     x_low -= 1
   end
   until invalid? build_url(url, x_high + 1, valid_y)
-    print "\e[KCChecking X value: #{x_high}\r"
+    print "\r\e[KChecking X value: #{x_high}\r"
     x_high += 1
   end
 
   y_low = y_high = valid_y
   until invalid? build_url(url, valid_x, y_low - 1)
-    print "\e[KCChecking Y value: #{y_low}\r"
+    print "\r\e[KChecking Y value: #{y_low}\r"
     y_low -= 1
   end
   until invalid? build_url(url, valid_x, y_high + 1)
-    print "\e[KCChecking Y value: #{y_high}\r"
+    print "\r\e[KChecking Y value: #{y_high}\r"
     y_high += 1
   end
 
@@ -110,8 +127,6 @@ if args.include? "-b"
   x_range, y_range = (x_low..x_high), (y_low..y_high)
 else
   # User input coordinate mode
-
-  url = args.first
 
   # CLI input function
   #
@@ -145,11 +160,14 @@ else
   end
 end
 
+File.open(COORDS_FILE, "w") { |f| f.write [x_range, y_range].to_yaml }
+
 # Use the tile at 0, 0 to calculate final image size
+print "Checking dimensions..."
 sample = Image.from_blob(URI.open(build_url url, x_range.first, y_range.first).read).first
 final_size = {x: sample.columns * x_range.size, y: sample.rows * y_range.size}
 format = sample.format
-puts "Image found, #{format} size #{final_size[:x]}x#{final_size[:y]}"
+puts "\rImage found, #{format} size #{final_size[:x]}x#{final_size[:y]}"
 puts
 
 dl_counter = 0
@@ -158,10 +176,11 @@ dl_total = x_range.size * y_range.size
 stitch = ImageList.new
 y_range.each do |y|
   row = ImageList.new
+
   x_range.each do |x|
     print "Downloading... [#{dl_counter += 1}/#{dl_total}]\r"
 
-    temp = "#{TEMP_DIR}/#{x}_#{y}.#{format.downcase}"
+    temp = "#{TEMP_DIR}/#{x}_#{y}.#{format == "JPEG" ? "jpg" : format.downcase}"
     if File.exists? temp
       # Load the backup file
       img = Image.read(temp).first
@@ -173,6 +192,8 @@ y_range.each do |y|
 
     row.push img
   end
+
+  stitch.push row.append(false)
 end
 
 thread = Thread.new { stitch = stitch.append(true) }
@@ -195,13 +216,15 @@ end
 
 print "Enter file name for map: "
 filename = STDIN.gets.chomp
-print "Saving, this may take a minute..."
 
-thread.join
+print "Saving, this may take a minute..."
+thread.join # Wait for ImageMagick thread to finish joining rows
 stitch.write filename
-puts "\nImage written to: #{filename}"
+puts "\n\nImage written to: #{filename}"
+
 if save_tiles
-  File.rename TEMP_DIR, TILES_DIR
+  FileUtils.rm COORDS_FILE
+  FileUtils.mv TEMP_DIR, TILES_DIR
   puts "Tiles saved to: #{TILES_DIR.match /\w+/}/"
 else
   FileUtils.rm_rf TEMP_DIR

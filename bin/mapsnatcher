@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 
+require "optimist"
 require "fileutils"
 require "open-uri"
 require "net/http"
@@ -10,6 +11,30 @@ include Magick
 TEMP_DIR = "./.ms.tmp"
 COORDS_FILE = "#{TEMP_DIR}/coords"
 TILES_DIR = "./tiles"
+
+opts = Optimist::options do
+  version "mapsnatcher #{File.read(File.expand_path("../../VERSION", __FILE__)).strip}"
+  banner self.version
+  banner "Usage:"
+  banner "  mapsnatcher [options] http://mapwebsite.com/0/xxx/yyy.png"
+  banner "  Place XXX and YYY in place of where the respective coordinate numbers would be"
+  banner "  in the URL. The first number is typically the zoom level, which is constant."
+  banner "Options:"
+  opt :bounds, "find outer boundaries of the map automatically"
+  opt :save, "save tiles to a directory ./tiles/"
+  opt :version, "display version number"
+  opt :help, "display this message"
+  educate_on_error
+end
+
+Optimist::educate if ARGV.empty?
+if ARGV.first !~ /\A#{URI::regexp(["http", "https"])}\z/
+  puts "Error: Invalid URL."
+  puts
+  Optimist::educate
+end
+
+url = ARGV.first
 
 # False if URL returns a 200
 #
@@ -27,22 +52,6 @@ end
 # @return usable URL for map tile
 def build_url(url, x, y)
   url.gsub(/xxx/i, x.to_s).gsub(/yyy/i, y.to_s)
-end
-
-if ARGV.empty? or %w[-h --help].include? ARGV.first
-  puts 'Usage: mapsnatcher "http://mapwebsite.com/0/XXX/YYY.png"'
-  puts
-  puts "       Place XXX and YYY in place of where the respective coordinate numbers would be"
-  puts "       in the URL. The first number is typically the zoom level, which is constant."
-  puts
-  puts "  [-b] find outer bounds of map automatically"
-  puts "  [-s] save tiles to a directory ./tiles/"
-  exit 0
-end
-
-if %w[-v --version].include? ARGV.first
-  puts "mapsnatcher #{File.read(File.expand_path("../../VERSION", __FILE__)).strip}"
-  exit 0
 end
 
 x_range = y_range = nil
@@ -65,20 +74,10 @@ elsif !Dir.empty? TEMP_DIR
   puts
 end
 
-save_tiles = false
-if (args = ARGV).include? "-s"
-  args -= ["-s"]
-  save_tiles = true
-end
-
-url = args.first
-
 if ![x_range, y_range].include? nil
   puts "Found #{'Saved ' if using_saved_coords}Coordinate Range: [#{x_range.first}-#{x_range.last}], [#{y_range.first}-#{y_range.last}]"
-elsif args.include? "-b"
+elsif opts[:bounds]
   # Automatic boundary mode
-
-  url = (args - ["-b"]).first
 
   # CLI input function
   #
@@ -222,7 +221,7 @@ thread.join # Wait for ImageMagick thread to finish joining rows
 stitch.write filename
 puts "\n\nImage written to: #{filename}"
 
-if save_tiles
+if opts[:save]
   FileUtils.rm COORDS_FILE
   FileUtils.mv TEMP_DIR, TILES_DIR
   puts "Tiles saved to: #{TILES_DIR.match /\w+/}/"

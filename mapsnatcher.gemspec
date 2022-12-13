@@ -14,10 +14,7 @@ Gem::Specification.new do |gem|
   gem.bindir = "bin"
   gem.executables = %w[mapsnatcher]
 
-  gem.test_files = Dir["spec/**/*"]
-  gem.files = Dir["bin/**/*"] + gem.test_files + %w[
-    LICENSE README.md VERSION mapsnatcher.gemspec
-  ]
+  gem.files = `git ls-files -z`.split "\x0"
 
   gem.required_ruby_version = "~> 3.0"
 

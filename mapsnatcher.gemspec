@@ -18,6 +18,7 @@ Gem::Specification.new do |gem|
 
   gem.required_ruby_version = "~> 3.0"
 
+  gem.add_dependency "async", "~> 1.3"
   gem.add_dependency "rmagick", "~> 5.1"
   gem.add_dependency "optimist", "~> 3.0"
   gem.add_dependency "progressbar", "~> 1.11"

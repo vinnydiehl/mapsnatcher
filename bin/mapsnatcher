@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 
+require "async"
 require "fileutils"
 require "net/http"
 require "open-uri"
@@ -201,29 +202,33 @@ pbar = ProgressBar.create(
 )
 
 stitch = ImageList.new
-y_range.each do |y|
+y_range.each_with_index do |y, yi|
   row = ImageList.new
 
-  x_range.each do |x|
-    pbar.increment
+  Async do |task|
+    x_range.each_with_index do |x, xi|
+      task.async do
+        temp = "#{TEMP_DIR}/#{x}_#{y}.#{format == "JPEG" ? "jpg" : format.downcase}"
+        if File.exist? temp
+          # Load the backup file
+          img = Image.read(temp).first
+        else
+          blob = URI.open(build_url url, x, y).read
+          File.open(temp, "wb") { |f| f.write blob }
+          img = Image.from_blob(blob).first
+        end
 
-    temp = "#{TEMP_DIR}/#{x}_#{y}.#{format == "JPEG" ? "jpg" : format.downcase}"
-    if File.exist? temp
-      # Load the backup file
-      img = Image.read(temp).first
-    else
-      blob = URI.open(build_url url, x, y).read
-      File.open(temp, "wb") { |f| f.write blob }
-      img = Image.from_blob(blob).first
+        row[xi] = img
+
+        pbar.increment
+      end
     end
-
-    row.push img
   end
 
-  stitch.push row.append(false)
+  stitch[yi] = row.append(false)
 end
 
-thread = Thread.new { stitch = stitch.append(true) }
+stitch = stitch.append(true)
 
 puts "\nDone!"
 
@@ -247,7 +252,6 @@ unless filename = opts[:output]
 end
 
 print "Saving, this may take a minute..."
-thread.join # Wait for ImageMagick thread to finish joining rows
 stitch.write filename
 puts "\n\nImage written to: #{filename}"
 

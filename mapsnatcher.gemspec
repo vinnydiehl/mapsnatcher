@@ -20,4 +20,5 @@ Gem::Specification.new do |gem|
 
   gem.add_dependency "rmagick", "~> 5.1"
   gem.add_dependency "optimist", "~> 3.0"
+  gem.add_dependency "progressbar", "~> 1.11"
 end

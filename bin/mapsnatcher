@@ -1,11 +1,13 @@
 #!/usr/bin/env ruby
 
-require "optimist"
 require "fileutils"
-require "open-uri"
 require "net/http"
-require "yaml"
+require "open-uri"
+require "optimist"
+require "progressbar"
 require "rmagick"
+require "yaml"
+
 include Magick
 
 TEMP_DIR = "./.ms.tmp"
@@ -192,15 +194,18 @@ format = sample.format
 puts "\rImage found, #{format} size #{final_size[:x]}x#{final_size[:y]}"
 puts
 
-dl_counter = 0
-dl_total = x_range.size * y_range.size
+pbar = ProgressBar.create(
+  title: "Downloading",
+  format: "%t [%c/%C] [%B] %e",
+  total: x_range.size * y_range.size
+)
 
 stitch = ImageList.new
 y_range.each do |y|
   row = ImageList.new
 
   x_range.each do |x|
-    print "Downloading... [#{dl_counter += 1}/#{dl_total}]\r"
+    pbar.increment
 
     temp = "#{TEMP_DIR}/#{x}_#{y}.#{format == "JPEG" ? "jpg" : format.downcase}"
     if File.exist? temp
